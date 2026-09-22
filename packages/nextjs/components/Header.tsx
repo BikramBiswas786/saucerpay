@@ -1,34 +1,19 @@
 "use client";
 
 import React, { useRef } from "react";
-import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Bars3Icon, BugAntIcon, MagnifyingGlassIcon } from "@heroicons/react/24/outline";
+import { Bars3Icon } from "@heroicons/react/24/outline";
 import { RainbowKitCustomConnectButton } from "~~/components/scaffold-hbar";
 import { useOutsideClick } from "~~/hooks/scaffold-hbar";
 
 type HeaderMenuLink = {
   label: string;
   href: string;
-  icon?: React.ReactNode;
 };
 
 export const menuLinks: HeaderMenuLink[] = [
-  {
-    label: "Home",
-    href: "/",
-  },
-  {
-    label: "Debug Contracts",
-    href: "/debug",
-    icon: <BugAntIcon className="h-4 w-4" />,
-  },
-  {
-    label: "Block Explorer",
-    href: "/blockexplorer",
-    icon: <MagnifyingGlassIcon className="h-4 w-4" />,
-  },
+  { label: "Invoices", href: "/" },
 ];
 
 export const HeaderMenuLinks = () => {
@@ -36,7 +21,7 @@ export const HeaderMenuLinks = () => {
 
   return (
     <>
-      {menuLinks.map(({ label, href, icon }) => {
+      {menuLinks.map(({ label, href }) => {
         const isActive = pathname === href;
         return (
           <li key={href}>
@@ -47,19 +32,35 @@ export const HeaderMenuLinks = () => {
                 isActive ? "bg-primary/10 text-primary font-semibold" : "hover:bg-primary/5"
               } py-1.5 px-3 text-sm rounded-full gap-2 grid grid-flow-col transition-colors`}
             >
-              {icon}
               <span>{label}</span>
             </Link>
           </li>
         );
       })}
+      <li>
+        <a
+          href="https://hashscan.io/testnet/contract/0xd955a0ADe4a5EC4AA95422D2D7650749A2fe1db3"
+          target="_blank"
+          rel="noreferrer"
+          className="py-1.5 px-3 text-sm rounded-full hover:bg-primary/5"
+        >
+          Contract
+        </a>
+      </li>
+      <li>
+        <a
+          href="https://github.com/BikramBiswas786/saucerpay"
+          target="_blank"
+          rel="noreferrer"
+          className="py-1.5 px-3 text-sm rounded-full hover:bg-primary/5"
+        >
+          GitHub
+        </a>
+      </li>
     </>
   );
 };
 
-/**
- * Site header
- */
 export const Header = () => {
   const burgerMenuRef = useRef<HTMLDetailsElement>(null);
   useOutsideClick(burgerMenuRef, () => {
@@ -82,15 +83,14 @@ export const Header = () => {
             <HeaderMenuLinks />
           </ul>
         </details>
-        <Link href="/" passHref className="hidden lg:flex items-center gap-3 ml-4 mr-6 shrink-0">
-          <div className="flex relative w-9 h-9">
-            <Image alt="Hedera icon" className="cursor-pointer dark:hidden" fill src="/Hedera-Icon-Dark.svg" />
-            <Image alt="Hedera icon" className="cursor-pointer hidden dark:block" fill src="/Hedera-Icon-White.svg" />
+        <Link href="/" passHref className="flex items-center gap-3 ml-4 mr-6 shrink-0">
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-primary-content font-bold text-sm">
+            SP
           </div>
           <div className="flex flex-col">
-            <span className="font-bold leading-tight text-base">Scaffold-HBAR</span>
+            <span className="font-bold leading-tight text-base">SaucerPay</span>
             <span className="text-[10px] tracking-wider uppercase text-base-content/50 font-medium">
-              Built on Hedera
+              Invoice escrow on Hedera
             </span>
           </div>
         </Link>

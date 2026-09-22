@@ -6,9 +6,6 @@ import { SwitchTheme } from "~~/components/SwitchTheme";
 import { useFetchHbarPrice } from "~~/hooks/scaffold-hbar";
 import { useTargetNetwork } from "~~/hooks/scaffold-hbar/useTargetNetwork";
 
-/**
- * Site footer
- */
 export const Footer = () => {
   const { targetNetwork } = useTargetNetwork();
   const isTestnet = targetNetwork.id !== hedera.id;
@@ -35,29 +32,28 @@ export const Footer = () => {
       <div className="w-full">
         <ul className="menu menu-horizontal w-full">
           <div className="flex justify-center items-center gap-3 text-sm w-full text-base-content/60">
+            <span className="font-semibold text-base-content/80">SaucerPay</span>
+            <span className="opacity-30">|</span>
             <a
-              href="https://github.com/hedera-dev/scaffold-hbar"
+              href="https://github.com/BikramBiswas786/saucerpay"
               target="_blank"
               rel="noreferrer"
               className="link hover:text-primary"
             >
-              GitHub
+              Source
             </a>
             <span className="opacity-30">|</span>
-            <span>
-              Built on{" "}
-              <a
-                href="https://hedera.com/"
-                target="_blank"
-                rel="noreferrer"
-                className="font-semibold link hover:text-primary"
-              >
-                Hedera
-              </a>
-            </span>
+            <a
+              href="https://hashscan.io/testnet/contract/0xd955a0ADe4a5EC4AA95422D2D7650749A2fe1db3"
+              target="_blank"
+              rel="noreferrer"
+              className="link hover:text-primary"
+            >
+              HashScan
+            </a>
             <span className="opacity-30">|</span>
-            <a href="https://docs.hedera.com/" target="_blank" rel="noreferrer" className="link hover:text-primary">
-              Docs
+            <a href="https://hedera.com/" target="_blank" rel="noreferrer" className="link hover:text-primary">
+              Hedera
             </a>
           </div>
         </ul>

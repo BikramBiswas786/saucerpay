@@ -6,8 +6,9 @@ import "~~/styles/globals.css";
 import { getMetadata } from "~~/utils/scaffold-hbar/getMetadata";
 
 export const metadata = getMetadata({
-  title: "Scaffold-HBAR",
-  description: "Built with Scaffold-HBAR",
+  title: "SaucerPay — Invoice escrow on Hedera",
+  description:
+    "Create invoices, settle in HBAR or HTS tokens, and verify payments on HashScan. Scaffold-HBAR template for Hedera.",
 });
 
 const ScaffoldHbarApp = ({ children }: { children: React.ReactNode }) => {
