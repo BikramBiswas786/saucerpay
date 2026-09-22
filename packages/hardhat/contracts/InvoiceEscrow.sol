@@ -10,7 +10,11 @@ interface IERC20Minimal {
 /// @notice Creates invoices, accepts native HBAR or Hedera EVM/HTS tokens, and
 ///         emits a receipt event that can be mirrored or stamped in HCS.
 contract InvoiceEscrow {
-    enum Status { Open, Paid, Cancelled }
+    enum Status {
+        Open,
+        Paid,
+        Cancelled
+    }
 
     struct Invoice {
         address payable merchant;
@@ -25,8 +29,21 @@ contract InvoiceEscrow {
     uint256 public nextInvoiceId;
     mapping(uint256 => Invoice) public invoices;
 
-    event InvoiceCreated(uint256 indexed invoiceId, address indexed merchant, address indexed token, uint256 amount, uint64 dueAt, bytes32 metadataHash);
-    event InvoicePaid(uint256 indexed invoiceId, address indexed payer, address indexed token, uint256 amount, bytes32 receiptHash);
+    event InvoiceCreated(
+        uint256 indexed invoiceId,
+        address indexed merchant,
+        address indexed token,
+        uint256 amount,
+        uint64 dueAt,
+        bytes32 metadataHash
+    );
+    event InvoicePaid(
+        uint256 indexed invoiceId,
+        address indexed payer,
+        address indexed token,
+        uint256 amount,
+        bytes32 receiptHash
+    );
     event InvoiceCancelled(uint256 indexed invoiceId, address indexed merchant);
     event InvoiceWithdrawn(uint256 indexed invoiceId, address indexed merchant, address indexed token, uint256 amount);
 
@@ -36,7 +53,12 @@ contract InvoiceEscrow {
     error WrongPayment();
     error TransferFailed();
 
-    function createInvoice(address token, uint256 amount, uint64 dueAt, bytes32 metadataHash) external returns (uint256 invoiceId) {
+    function createInvoice(
+        address token,
+        uint256 amount,
+        uint64 dueAt,
+        bytes32 metadataHash
+    ) external returns (uint256 invoiceId) {
         if (amount == 0) revert InvalidAmount();
         invoiceId = nextInvoiceId++;
         invoices[invoiceId] = Invoice(payable(msg.sender), token, amount, 0, dueAt, Status.Open, metadataHash);
@@ -50,7 +72,8 @@ contract InvoiceEscrow {
             if (msg.value != invoice.amount) revert WrongPayment();
         } else {
             if (msg.value != 0) revert WrongPayment();
-            if (!IERC20Minimal(invoice.token).transferFrom(msg.sender, address(this), invoice.amount)) revert TransferFailed();
+            if (!IERC20Minimal(invoice.token).transferFrom(msg.sender, address(this), invoice.amount))
+                revert TransferFailed();
         }
         invoice.paidAmount = invoice.amount;
         invoice.status = Status.Paid;
@@ -72,7 +95,7 @@ contract InvoiceEscrow {
         uint256 amount = invoice.paidAmount;
         invoice.paidAmount = 0;
         if (invoice.token == address(0)) {
-            (bool ok,) = invoice.merchant.call{value: amount}("");
+            (bool ok, ) = invoice.merchant.call{ value: amount }("");
             if (!ok) revert TransferFailed();
         } else if (!IERC20Minimal(invoice.token).transfer(invoice.merchant, amount)) {
             revert TransferFailed();
@@ -80,4 +103,3 @@ contract InvoiceEscrow {
         emit InvoiceWithdrawn(invoiceId, invoice.merchant, invoice.token, amount);
     }
 }
-    

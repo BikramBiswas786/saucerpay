@@ -9,7 +9,7 @@
     ]
   },
   "scripts": {
-    "format": "yarn next:format && yarn hardhat:format && yarn foundry:format",
+    "format": "yarn next:format && yarn hardhat:format",
     "hardhat:account": "yarn workspace @sh/hardhat account",
     "hardhat:account:generate": "yarn workspace @sh/hardhat account:generate",
     "hardhat:account:import": "yarn workspace @sh/hardhat account:import",
@@ -28,7 +28,7 @@
     "hardhat:verify": "yarn workspace @sh/hardhat verify",
     "hardhat:verify:testnet": "yarn workspace @sh/hardhat verify:testnet",
     "hardhat:verify:mainnet": "yarn workspace @sh/hardhat verify:mainnet",
-    "lint": "yarn next:lint && yarn hardhat:lint && yarn foundry:lint",
+    "lint": "yarn next:lint && yarn hardhat:lint",
     "next:build": "yarn workspace @sh/nextjs build",
     "next:check-types": "yarn workspace @sh/nextjs check-types",
     "next:dev": "yarn workspace @sh/nextjs dev",

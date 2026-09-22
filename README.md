@@ -17,10 +17,16 @@ The integration is load-bearing: removing Hedera EVM token compatibility, HashSc
 ## Scaffold in one command
 
 ```bash
-npm create scaffold-hbar@latest -- --template BikramBiswas786/saucerpay
+npm create scaffold-hbar@latest --template BikramBiswas786/saucerpay
 cd saucerpay
 npm install
 ```
+
+## Why this is more than an AI demo
+
+The product is not “a form that calls a contract.” It packages a business result: **a merchant can request payment, a payer can settle in HBAR or an HTS token, and both sides receive a verifiable settlement trail**. The contract owns the settlement state, the event schema makes the result inspectable on HashScan, the Mirror Node route supplies token context, and the HCS route can anchor an application receipt for downstream systems.
+
+That distinction matters. AI can generate a generic checkout screen quickly. It is much less valuable unless the workflow is tied to a real operational outcome. SaucerPay therefore keeps the scope narrow and reusable: invoice creation, exact settlement, merchant withdrawal, and receipt verification. The reusable asset is the workflow and its Hedera-native integration, not the number of screens.
 
 The template targets Node.js **20.18.3 or later** and includes Next.js, Hardhat, TypeScript, Viem, Wagmi, the Hedera SDK, and the Scaffold-HBAR UI components.
 

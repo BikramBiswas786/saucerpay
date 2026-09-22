@@ -16,7 +16,8 @@ describe("InvoiceEscrow", function () {
     const amount = ethers.parseEther("1");
     await escrow.connect(merchant).createInvoice(ethers.ZeroAddress, amount, 0, ethers.id("order-1"));
     await expect(escrow.connect(payer).payInvoice(0, ethers.id("receipt-1"), { value: amount }))
-      .to.emit(escrow, "InvoicePaid").withArgs(0, payer.address, ethers.ZeroAddress, amount, ethers.id("receipt-1"));
+      .to.emit(escrow, "InvoicePaid")
+      .withArgs(0, payer.address, ethers.ZeroAddress, amount, ethers.id("receipt-1"));
     await expect(escrow.connect(merchant).withdraw(0)).to.emit(escrow, "InvoiceWithdrawn");
   });
 
@@ -27,7 +28,8 @@ describe("InvoiceEscrow", function () {
     await escrow.connect(merchant).createInvoice(await token.getAddress(), amount, 0, ethers.id("order-2"));
     await token.connect(payer).approve(await escrow.getAddress(), amount);
     await expect(escrow.connect(payer).payInvoice(0, ethers.id("receipt-2")))
-      .to.emit(escrow, "InvoicePaid").withArgs(0, payer.address, await token.getAddress(), amount, ethers.id("receipt-2"));
+      .to.emit(escrow, "InvoicePaid")
+      .withArgs(0, payer.address, await token.getAddress(), amount, ethers.id("receipt-2"));
     expect(await token.balanceOf(await escrow.getAddress())).to.equal(amount);
   });
 });
