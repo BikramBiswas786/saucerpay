@@ -1,0 +1,21 @@
+import { GenericContractsDeclaration } from "~~/utils/scaffold-hbar/contract";
+
+const deployedContracts = {
+  296: {
+    InvoiceEscrow: {
+      address: "0x0000000000000000000000000000000000000000",
+      deployedOnBlock: 0,
+      abi: [
+        { type: "function", name: "createInvoice", stateMutability: "nonpayable", inputs: [{ name: "token", type: "address" }, { name: "amount", type: "uint256" }, { name: "dueAt", type: "uint64" }, { name: "metadataHash", type: "bytes32" }], outputs: [{ name: "invoiceId", type: "uint256" }] },
+        { type: "function", name: "payInvoice", stateMutability: "payable", inputs: [{ name: "invoiceId", type: "uint256" }, { name: "receiptHash", type: "bytes32" }], outputs: [] },
+        { type: "function", name: "withdraw", stateMutability: "nonpayable", inputs: [{ name: "invoiceId", type: "uint256" }], outputs: [] },
+        { type: "function", name: "cancelInvoice", stateMutability: "nonpayable", inputs: [{ name: "invoiceId", type: "uint256" }], outputs: [] },
+        { type: "function", name: "nextInvoiceId", stateMutability: "view", inputs: [], outputs: [{ name: "", type: "uint256" }] },
+        { type: "event", name: "InvoiceCreated", anonymous: false, inputs: [{ indexed: true, name: "invoiceId", type: "uint256" }, { indexed: true, name: "merchant", type: "address" }, { indexed: true, name: "token", type: "address" }, { indexed: false, name: "amount", type: "uint256" }, { indexed: false, name: "dueAt", type: "uint64" }, { indexed: false, name: "metadataHash", type: "bytes32" }] },
+        { type: "event", name: "InvoicePaid", anonymous: false, inputs: [{ indexed: true, name: "invoiceId", type: "uint256" }, { indexed: true, name: "payer", type: "address" }, { indexed: true, name: "token", type: "address" }, { indexed: false, name: "amount", type: "uint256" }, { indexed: false, name: "receiptHash", type: "bytes32" }] },
+      ],
+    },
+  },
+} as const satisfies GenericContractsDeclaration;
+
+export default deployedContracts;
