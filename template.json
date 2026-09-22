@@ -1,0 +1,16 @@
+{
+  "name": "saucerpay",
+  "description": "Invoice in USDC. Pay any Hedera token via SaucerSwap, settle HTS escrow, stamp HCS receipts.",
+  "create-scaffold-hbar": {
+    "capabilities": {
+      "frontend": ["nextjs-app"],
+      "solidityFramework": ["hardhat"],
+      "packageManager": ["npm", "yarn"]
+    },
+    "defaults": {
+      "frontend": "nextjs-app",
+      "solidityFramework": "hardhat",
+      "packageManager": "npm"
+    }
+  }
+}
