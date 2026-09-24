@@ -5,14 +5,24 @@ import type { NextPage } from "next";
 import { formatEther, formatUnits, keccak256, parseEther, parseUnits, toBytes, zeroAddress } from "viem";
 import { useAccount, useChainId } from "wagmi";
 import { useScaffoldReadContract, useScaffoldWriteContract } from "~~/hooks/scaffold-hbar";
+import { humanizeHederaError } from "~~/utils/scaffold-hbar/humanizeHederaError";
 
 const ZERO = zeroAddress;
 const ESCROW = "0xd955a0ADe4a5EC4AA95422D2D7650749A2fe1db3" as const;
 const HASHSCAN_TX = (hash: string) => `https://hashscan.io/testnet/transaction/${hash}`;
 const HASHSCAN_CONTRACT = `https://hashscan.io/testnet/contract/${ESCROW}`;
 const HEDERA_TESTNET_ID = 296;
-
 const STATUS_LABEL = ["Open", "Paid", "Cancelled"] as const;
+
+type InvoiceTuple = readonly [
+  merchant: `0x${string}`,
+  token: `0x${string}`,
+  amount: bigint,
+  paidAmount: bigint,
+  dueAt: bigint,
+  status: number | bigint,
+  metadataHash: `0x${string}`,
+];
 
 const toBytes32Ref = (value: string) => keccak256(toBytes(value || "saucerpay"));
 
@@ -28,12 +38,13 @@ const Home: NextPage = () => {
 
   const [token, setToken] = useState("");
   const [amount, setAmount] = useState("0.1");
-  const [decimals, setDecimals] = useState("18");
+  const [decimals, setDecimals] = useState("8");
   const [metadata, setMetadata] = useState("order-001");
   const [invoiceId, setInvoiceId] = useState("0");
   const [receiptRef, setReceiptRef] = useState("");
   const [status, setStatus] = useState("");
   const [lastTx, setLastTx] = useState<string | null>(null);
+  const [hederaAccount, setHederaAccount] = useState<string | null | undefined>(undefined);
 
   const { writeContractAsync, isMining } = useScaffoldWriteContract({ contractName: "InvoiceEscrow" });
 
@@ -67,78 +78,118 @@ const Home: NextPage = () => {
     return Array.from({ length: count }, (_, i) => BigInt(invoiceCount - 1 - i));
   }, [invoiceCount]);
 
+  useEffect(() => {
+    if (!address || wrongNetwork) {
+      setHederaAccount(undefined);
+      return;
+    }
+    let live = true;
+    setHederaAccount(undefined);
+    fetch(`/api/hedera/account?evm=${address}&network=testnet`)
+      .then(async res => {
+        const body = (await res.json()) as { accountId?: string | null };
+        if (live) setHederaAccount(body.accountId ?? null);
+      })
+      .catch(() => {
+        if (live) setHederaAccount(null);
+      });
+    return () => {
+      live = false;
+    };
+  }, [address, wrongNetwork]);
+
+  const unknownHederaAccount = isConnected && !wrongNetwork && hederaAccount === null;
+  const writesBlocked = !isConnected || wrongNetwork || unknownHederaAccount || isMining;
+
+  const guardWallet = () => {
+    if (!isConnected) {
+      setStatus("Connect a wallet first.");
+      return false;
+    }
+    if (wrongNetwork) {
+      setStatus("Switch the wallet to Hedera Testnet (chain ID 296). RPC: https://testnet.hashio.io/api");
+      return false;
+    }
+    if (unknownHederaAccount) {
+      setStatus(
+        `No Hedera account for ${shortAddr(address)}. Import the Portal ECDSA key for your 0.0.x testnet account — a random MetaMask key will always fail simulation.`,
+      );
+      return false;
+    }
+    return true;
+  };
+
   const createInvoice = async (event: FormEvent) => {
     event.preventDefault();
-    if (!isConnected) return setStatus("Connect a funded Hedera testnet wallet first.");
-    if (wrongNetwork) return setStatus("Switch wallet network to Hedera Testnet (chain ID 296).");
-    if (!tokenAddress) return setStatus("Enter a valid HTS token ID (0.0.x) or EVM address, or leave blank for HBAR.");
+    if (!guardWallet()) return;
+    if (!tokenAddress) {
+      setStatus("Enter a valid HTS token ID (0.0.x) or 0x address, or leave blank for HBAR.");
+      return;
+    }
     try {
-      setStatus("Confirm create invoice in your wallet…");
+      setStatus("Confirm create invoice in the wallet…");
       setLastTx(null);
-      const value = isHbar ? parseEther(amount) : parseUnits(amount, Number(decimals));
+      const value = isHbar ? parseEther(amount) : parseUnits(amount, Number(decimals || "8"));
       const dueAt = BigInt(Math.floor(Date.now() / 1000) + 7 * 24 * 60 * 60);
       const hash = await writeContractAsync({
         functionName: "createInvoice",
         args: [tokenAddress, value, dueAt, toBytes32Ref(metadata)],
       });
       if (hash) setLastTx(hash);
-      setStatus(hash ? `Invoice created.` : "Invoice submitted.");
+      setStatus(hash ? "Invoice created on Hedera testnet." : "Invoice submitted.");
       await refetchNext();
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Create failed.");
+      setStatus(humanizeHederaError(error));
     }
   };
 
   const payInvoice = async () => {
-    if (!isConnected) return setStatus("Connect a funded Hedera testnet wallet first.");
-    if (wrongNetwork) return setStatus("Switch wallet network to Hedera Testnet (chain ID 296).");
-    if (invoiceId === "") return setStatus("Enter an invoice ID.");
+    if (!guardWallet()) return;
+    if (invoiceId === "") {
+      setStatus("Enter an invoice ID, or tap Pay on a row in the board.");
+      return;
+    }
     try {
-      setStatus("Confirm payment in your wallet…");
+      setStatus("Loading invoice from the contract…");
       setLastTx(null);
-      await refetchPayInvoice();
-      const inv = payInvoiceData as
-        | readonly [
-            `0x${string}`,
-            `0x${string}`,
-            bigint,
-            bigint,
-            bigint,
-            number,
-            `0x${string}`,
-          ]
-        | undefined;
-
-      const invToken = inv?.[1];
-      const invAmount = inv?.[2];
-      const invStatus = inv?.[5];
-
-      if (invStatus !== undefined && Number(invStatus) !== 0) {
-        return setStatus(`Invoice #${invoiceId} is not Open (status ${STATUS_LABEL[Number(invStatus)] ?? invStatus}).`);
+      const fresh = await refetchPayInvoice();
+      const inv = (fresh.data ?? payInvoiceData) as InvoiceTuple | undefined;
+      if (!inv || inv[0] === ZERO) {
+        setStatus(`Invoice #${invoiceId} was not found on the escrow.`);
+        return;
       }
 
-      const payValue =
-        invToken && invToken.toLowerCase() !== ZERO.toLowerCase()
-          ? undefined
-          : invAmount !== undefined
-            ? invAmount
-            : parseEther(amount);
+      const invToken = inv[1];
+      const invAmount = inv[2];
+      const invStatus = Number(inv[5]);
+      const hbarInvoice = invToken.toLowerCase() === ZERO.toLowerCase();
+
+      if (invStatus !== 0) {
+        setStatus(`Invoice #${invoiceId} is ${STATUS_LABEL[invStatus] ?? invStatus} — not payable.`);
+        return;
+      }
+
+      setStatus(
+        hbarInvoice
+          ? `Confirm payment of ${formatEther(invAmount)} HBAR (exact on-chain amount)…`
+          : "Confirm HTS payment (0 HBAR value; allowance required)…",
+      );
 
       const hash = await writeContractAsync({
         functionName: "payInvoice",
         args: [BigInt(invoiceId), toBytes32Ref(receiptRef || `receipt-${invoiceId}`)],
-        ...(payValue !== undefined ? { value: payValue } : {}),
+        ...(hbarInvoice ? { value: invAmount } : { value: 0n }),
       });
       if (hash) setLastTx(hash);
-      setStatus(hash ? `Payment submitted.` : "Payment submitted.");
+      setStatus(hash ? "Payment submitted." : "Payment submitted.");
       await refetchNext();
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Payment failed.");
+      setStatus(humanizeHederaError(error));
     }
   };
 
   const withdrawInvoice = async (id: bigint) => {
-    if (!isConnected || wrongNetwork) return setStatus("Connect on Hedera Testnet (296).");
+    if (!guardWallet()) return;
     try {
       setStatus(`Withdrawing invoice #${id}…`);
       setLastTx(null);
@@ -150,18 +201,43 @@ const Home: NextPage = () => {
       setStatus(`Withdraw submitted for #${id}.`);
       await refetchNext();
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Withdraw failed.");
+      setStatus(humanizeHederaError(error));
     }
   };
+
+  const selectToPay = (id: string) => {
+    setInvoiceId(id);
+    document.getElementById("pay")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
+  const liveInvoice = payInvoiceData as InvoiceTuple | undefined;
 
   return (
     <main className="min-h-screen bg-base-200 px-4 py-10 sm:px-6">
       <div className="mx-auto max-w-6xl space-y-8">
         {wrongNetwork && (
-          <div className="alert alert-warning shadow-sm">
+          <div className="alert alert-warning">
             <span>
-              Wallet is on chain <strong>{chainId}</strong>. Switch to <strong>Hedera Testnet (296)</strong> or
-              transactions will fail with “Sender account not found.”
+              Wallet is on chain <strong>{chainId}</strong>. Switch to <strong>Hedera Testnet (296)</strong> — RPC{" "}
+              <code>https://testnet.hashio.io/api</code>.
+            </span>
+          </div>
+        )}
+        {unknownHederaAccount && (
+          <div className="alert alert-error">
+            <span>
+              Mirror Node has no Hedera account for {shortAddr(address)}. Create/import that ECDSA key in the{" "}
+              <a className="link" href="https://portal.hedera.com" target="_blank" rel="noreferrer">
+                Hedera Portal
+              </a>{" "}
+              and fund it. Simulation will keep failing until then.
+            </span>
+          </div>
+        )}
+        {hederaAccount && (
+          <div className="alert alert-success">
+            <span>
+              Hedera account <span className="font-mono font-semibold">{hederaAccount}</span> is ready on testnet.
             </span>
           </div>
         )}
@@ -169,18 +245,27 @@ const Home: NextPage = () => {
         <section className="grid gap-6 lg:grid-cols-[1.4fr_0.85fr] lg:items-stretch">
           <div className="rounded-3xl border border-base-300 bg-base-100 p-8 shadow-sm">
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-primary">SaucerPay</p>
-            <h1 className="mt-3 max-w-xl text-4xl font-bold tracking-tight md:text-5xl">
-              Invoice escrow for HBAR &amp; HTS
-            </h1>
+            <h1 className="mt-3 max-w-xl text-4xl font-bold tracking-tight md:text-5xl">Invoice escrow on Hedera</h1>
             <p className="mt-4 max-w-xl text-base text-base-content/70">
-              Merchants create exact-amount invoices. Payers settle on Hedera. Settlement is visible on HashScan — not a
-              demo form with no chain behind it.
+              Issue an invoice, collect the exact HBAR or HTS amount into escrow, then withdraw. Every step is a testnet
+              transaction you can open on HashScan.
             </p>
             <div className="mt-6 flex flex-wrap gap-2">
-              <span className="badge badge-primary">Exact settlement</span>
-              <span className="badge badge-ghost">HBAR + HTS</span>
-              <span className="badge badge-ghost">HashScan events</span>
-              <a className="badge badge-outline" href={HASHSCAN_CONTRACT} target="_blank" rel="noreferrer">
+              <a href="#create" className="badge badge-primary badge-lg cursor-pointer">
+                Create invoice
+              </a>
+              <a href="#pay" className="badge badge-secondary badge-lg cursor-pointer">
+                Pay exact amount
+              </a>
+              <a href="#board" className="badge badge-ghost badge-lg cursor-pointer">
+                Invoice board
+              </a>
+              <a
+                className="badge badge-outline badge-lg cursor-pointer"
+                href={HASHSCAN_CONTRACT}
+                target="_blank"
+                rel="noreferrer"
+              >
                 Live contract ↗
               </a>
             </div>
@@ -188,26 +273,27 @@ const Home: NextPage = () => {
 
           <div className="flex flex-col justify-between rounded-3xl bg-neutral p-7 text-neutral-content shadow-xl">
             <div>
-              <p className="text-xs uppercase tracking-widest text-neutral-content/50">Wallet</p>
+              <p className="text-xs uppercase tracking-widest text-neutral-content/50">Connected wallet</p>
               <p className="mt-2 break-all font-mono text-sm">{address ?? "Not connected"}</p>
-              <p className="mt-4 text-sm text-neutral-content/70">
-                Use a <strong>funded Hedera testnet</strong> account on chain 296. Random EVM wallets without a Hedera
-                account will fail simulation.
+              <p className="mt-3 text-sm text-neutral-content/70">
+                {hederaAccount
+                  ? `Mapped Hedera ID ${hederaAccount}`
+                  : "Needs a real 0.0.x testnet account on chain 296."}
               </p>
             </div>
-            <div className="mt-6 text-xs text-neutral-content/50">
-              Escrow {shortAddr(ESCROW)} · next id {" "}
+            <p className="mt-6 text-xs text-neutral-content/50">
+              Escrow {shortAddr(ESCROW)} · next invoice id{" "}
               <span className="font-mono text-neutral-content">{nextInvoiceId?.toString() ?? "—"}</span>
-            </div>
+            </p>
           </div>
         </section>
 
         <div className="grid gap-6 lg:grid-cols-2">
-          <form onSubmit={createInvoice} className="card border border-base-300 bg-base-100 shadow-sm">
+          <form id="create" onSubmit={createInvoice} className="card scroll-mt-24 border border-base-300 bg-base-100 shadow-sm">
             <div className="card-body gap-4">
               <div>
                 <h2 className="card-title text-xl">Create invoice</h2>
-                <p className="text-sm text-base-content/60">Leave token blank for native HBAR (18 decimals on JSON-RPC).</p>
+                <p className="text-sm text-base-content/60">Blank token field = native HBAR (18 JSON-RPC decimals).</p>
               </div>
               <label className="form-control">
                 <span className="label-text">HTS token (0.0.x or 0x…)</span>
@@ -237,18 +323,18 @@ const Home: NextPage = () => {
                 <span className="label-text">Order reference</span>
                 <input className="input input-bordered" value={metadata} onChange={e => setMetadata(e.target.value)} />
               </label>
-              <button className="btn btn-primary" type="submit" disabled={isMining || wrongNetwork}>
+              <button className="btn btn-primary" type="submit" disabled={writesBlocked}>
                 {isMining ? "Confirming…" : "Create invoice"}
               </button>
             </div>
           </form>
 
-          <section className="card border border-base-300 bg-base-100 shadow-sm">
+          <section id="pay" className="card scroll-mt-24 border border-base-300 bg-base-100 shadow-sm">
             <div className="card-body gap-4">
               <div>
                 <h2 className="card-title text-xl">Pay invoice</h2>
                 <p className="text-sm text-base-content/60">
-                  HBAR payments send the exact on-chain amount. HTS requires prior approve to the escrow.
+                  Amount is read from the contract. You cannot overpay or underpay.
                 </p>
               </div>
               <label className="form-control">
@@ -268,15 +354,19 @@ const Home: NextPage = () => {
                   onChange={e => setReceiptRef(e.target.value)}
                 />
               </label>
-              {payInvoiceData && (
-                <div className="rounded-xl bg-base-200 px-3 py-2 text-xs font-mono">
-                  Status: {STATUS_LABEL[Number((payInvoiceData as any)[5])] ?? "?"} · Amount:{" "}
-                  {(payInvoiceData as any)[1]?.toLowerCase() === ZERO
-                    ? `${formatEther((payInvoiceData as any)[2])} HBAR`
-                    : String((payInvoiceData as any)[2])}
+              {liveInvoice && liveInvoice[0] !== ZERO && (
+                <div className="rounded-xl bg-base-200 px-3 py-2 text-xs">
+                  <p>
+                    Status <span className="font-semibold">{STATUS_LABEL[Number(liveInvoice[5])] ?? "?"}</span>
+                    {" · "}
+                    {liveInvoice[1].toLowerCase() === ZERO
+                      ? `${formatEther(liveInvoice[2])} HBAR`
+                      : `${liveInvoice[2].toString()} units`}
+                  </p>
+                  <p className="mt-1 font-mono text-base-content/60">Merchant {shortAddr(liveInvoice[0])}</p>
                 </div>
               )}
-              <button className="btn btn-secondary" type="button" onClick={payInvoice} disabled={isMining || wrongNetwork}>
+              <button className="btn btn-secondary" type="button" onClick={payInvoice} disabled={writesBlocked}>
                 {isMining ? "Confirming…" : "Pay exact amount"}
               </button>
             </div>
@@ -284,24 +374,24 @@ const Home: NextPage = () => {
         </div>
 
         {(status || lastTx) && (
-          <div className="alert bg-base-100 border border-base-300 shadow-sm">
+          <div className="alert border border-base-300 bg-base-100">
             <div className="w-full space-y-1">
               {status && <p className="text-sm break-words">{status}</p>}
               {lastTx && (
-                <a className="link link-primary text-sm font-mono" href={HASHSCAN_TX(lastTx)} target="_blank" rel="noreferrer">
-                  View on HashScan ↗
+                <a className="link link-primary font-mono text-sm" href={HASHSCAN_TX(lastTx)} target="_blank" rel="noreferrer">
+                  Open transaction on HashScan ↗
                 </a>
               )}
             </div>
           </div>
         )}
 
-        <section className="card border border-base-300 bg-base-100 shadow-sm">
+        <section id="board" className="card scroll-mt-24 border border-base-300 bg-base-100 shadow-sm">
           <div className="card-body">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="card-title text-xl">Invoice board</h2>
-                <p className="text-sm text-base-content/60">Latest invoices on the live escrow (up to 12).</p>
+                <p className="text-sm text-base-content/60">Live reads from InvoiceEscrow · latest 12</p>
               </div>
               <button className="btn btn-ghost btn-sm" type="button" onClick={() => refetchNext()}>
                 Refresh
@@ -328,7 +418,7 @@ const Home: NextPage = () => {
                       <InvoiceRow
                         key={id.toString()}
                         id={id}
-                        onPay={() => setInvoiceId(id.toString())}
+                        onPay={() => selectToPay(id.toString())}
                         onWithdraw={() => withdrawInvoice(id)}
                         connected={address}
                       />
@@ -372,16 +462,7 @@ function InvoiceRow({
     );
   }
 
-  const [merchant, token, amount, , , status] = data as unknown as [
-    `0x${string}`,
-    `0x${string}`,
-    bigint,
-    bigint,
-    bigint,
-    number,
-    `0x${string}`,
-  ];
-
+  const [merchant, token, amount, , , status] = data as unknown as InvoiceTuple;
   const statusNum = Number(status);
   const label = STATUS_LABEL[statusNum] ?? String(statusNum);
   const isHbar = token.toLowerCase() === ZERO.toLowerCase();
