@@ -1,0 +1,17 @@
+# SaucerPay
+
+Invoice escrow on Hedera testnet for HBAR and HTS tokens.
+
+- Scaffold: npm create scaffold-hbar@latest --template BikramBiswas786/saucerpay
+- Chain: Hedera Testnet (296)
+- Contract: 0xd955a0ADe4a5EC4AA95422D2D7650749A2fe1db3
+- Agent manifest: GET /api/agent/manifest
+- Pricing: GET /api/quote
+- Token metadata: GET /api/hedera/token?id=0.0.x
+- Account map: GET /api/hedera/account?evm=0x
+- HCS receipts: POST /api/hedera/receipt
+
+Rules for agents:
+- Never commit secrets.
+- Pay invoices with the exact on-chain amount.
+- A MetaMask key with no Hedera 0.0.x account cannot send.
