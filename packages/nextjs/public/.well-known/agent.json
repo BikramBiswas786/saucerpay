@@ -1,0 +1,17 @@
+{
+  "name": "SaucerPay",
+  "description": "Public Hedera invoice escrow. Humans and AI agents can list, quote, and pay exact-amount invoices.",
+  "website": "https://nextjs-privacy-rebels-projects.vercel.app",
+  "chainId": 296,
+  "endpoints": {
+    "manifest": "/api/agent/manifest",
+    "invoices": "/api/invoices",
+    "invoice": "/api/invoices/{id}",
+    "quote": "/api/quote",
+    "token": "/api/hedera/token?id=0.0.x",
+    "account": "/api/hedera/account?evm=0x",
+    "llms": "/llms.txt"
+  },
+  "parallel": true,
+  "auth": "none for reads; wallet signature for payInvoice/createInvoice"
+}
