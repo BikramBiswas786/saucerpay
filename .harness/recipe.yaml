@@ -1,0 +1,13 @@
+schemaVersion: 2
+name: saucerpay
+description: Hedera invoice escrow with SaucerSwap quotes, HTS, HCS, and Mirror Node.
+baseline:
+  commands:
+    - name: install
+      command: yarn install
+    - name: compile
+      command: yarn hardhat:compile
+    - name: test
+      command: yarn hardhat:test
+    - name: build
+      command: yarn next:build
