@@ -24,6 +24,13 @@ type InvoiceTuple = readonly [
   metadataHash: `0x${string}`,
 ];
 
+type Quote = {
+  hbarUsd: number;
+  officialHbarUsd: number;
+  settlementSource: string;
+  dex: { bookId: string; hbarUsd: number; status: string } | null;
+};
+
 const toBytes32Ref = (value: string) => keccak256(toBytes(value || "saucerpay"));
 
 const shortAddr = (value?: string) => {
@@ -38,6 +45,7 @@ const Home: NextPage = () => {
 
   const [token, setToken] = useState("");
   const [amount, setAmount] = useState("0.1");
+  const [usd, setUsd] = useState("");
   const [decimals, setDecimals] = useState("8");
   const [metadata, setMetadata] = useState("order-001");
   const [invoiceId, setInvoiceId] = useState("0");
@@ -45,6 +53,8 @@ const Home: NextPage = () => {
   const [status, setStatus] = useState("");
   const [lastTx, setLastTx] = useState<string | null>(null);
   const [hederaAccount, setHederaAccount] = useState<string | null | undefined>(undefined);
+  const [quote, setQuote] = useState<Quote | null>(null);
+  const [tokenHint, setTokenHint] = useState("");
 
   const { writeContractAsync, isMining } = useScaffoldWriteContract({ contractName: "InvoiceEscrow" });
 
@@ -79,12 +89,18 @@ const Home: NextPage = () => {
   }, [invoiceCount]);
 
   useEffect(() => {
+    fetch("/api/quote")
+      .then(r => r.json())
+      .then(setQuote)
+      .catch(() => setQuote(null));
+  }, []);
+
+  useEffect(() => {
     if (!address || wrongNetwork) {
       setHederaAccount(undefined);
       return;
     }
     let live = true;
-    setHederaAccount(undefined);
     fetch(`/api/hedera/account?evm=${address}&network=testnet`)
       .then(async res => {
         const body = (await res.json()) as { accountId?: string | null };
@@ -100,6 +116,8 @@ const Home: NextPage = () => {
 
   const unknownHederaAccount = isConnected && !wrongNetwork && hederaAccount === null;
   const writesBlocked = !isConnected || wrongNetwork || unknownHederaAccount || isMining;
+  const usdHint =
+    isHbar && quote && Number(amount) > 0 ? `≈ $${(Number(amount) * quote.hbarUsd).toFixed(4)} USD` : "";
 
   const guardWallet = () => {
     if (!isConnected) {
@@ -111,12 +129,34 @@ const Home: NextPage = () => {
       return false;
     }
     if (unknownHederaAccount) {
-      setStatus(
-        `No Hedera account for ${shortAddr(address)}. Import the Portal ECDSA key for your 0.0.x testnet account — a random MetaMask key will always fail simulation.`,
-      );
+      setStatus(`No Hedera account for ${shortAddr(address)}. Import a Portal ECDSA 0.0.x key on chain 296.`);
       return false;
     }
     return true;
+  };
+
+  const applyUsd = (value: string) => {
+    setUsd(value);
+    if (!quote || !value) return;
+    const n = Number(value);
+    if (!Number.isFinite(n) || n <= 0 || !quote.hbarUsd) return;
+    setAmount((n / quote.hbarUsd).toFixed(6));
+  };
+
+  const lookupToken = async () => {
+    const id = token.trim();
+    if (!/^0\.0\.\d+$/.test(id)) {
+      setTokenHint("Enter a Hedera token id such as 0.0.429274, or leave blank for HBAR.");
+      return;
+    }
+    const res = await fetch(`/api/hedera/token?id=${id}`);
+    const body = await res.json();
+    if (!res.ok) {
+      setTokenHint(body.error ?? "Token not found");
+      return;
+    }
+    setDecimals(String(body.decimals ?? "8"));
+    setTokenHint(`${body.name} (${body.symbol}) · ${body.decimals} decimals · treasury ${body.treasury}`);
   };
 
   const createInvoice = async (event: FormEvent) => {
@@ -158,23 +198,19 @@ const Home: NextPage = () => {
         setStatus(`Invoice #${invoiceId} was not found on the escrow.`);
         return;
       }
-
       const invToken = inv[1];
       const invAmount = inv[2];
       const invStatus = Number(inv[5]);
       const hbarInvoice = invToken.toLowerCase() === ZERO.toLowerCase();
-
       if (invStatus !== 0) {
         setStatus(`Invoice #${invoiceId} is ${STATUS_LABEL[invStatus] ?? invStatus} — not payable.`);
         return;
       }
-
       setStatus(
         hbarInvoice
           ? `Confirm payment of ${formatEther(invAmount)} HBAR (exact on-chain amount)…`
           : "Confirm HTS payment (0 HBAR value; allowance required)…",
       );
-
       const hash = await writeContractAsync({
         functionName: "payInvoice",
         args: [BigInt(invoiceId), toBytes32Ref(receiptRef || `receipt-${invoiceId}`)],
@@ -193,16 +229,29 @@ const Home: NextPage = () => {
     try {
       setStatus(`Withdrawing invoice #${id}…`);
       setLastTx(null);
-      const hash = await writeContractAsync({
-        functionName: "withdraw",
-        args: [id],
-      });
+      const hash = await writeContractAsync({ functionName: "withdraw", args: [id] });
       if (hash) setLastTx(hash);
       setStatus(`Withdraw submitted for #${id}.`);
       await refetchNext();
     } catch (error) {
       setStatus(humanizeHederaError(error));
     }
+  };
+
+  const stampHcs = async () => {
+    if (!lastTx) return;
+    setStatus("Stamping HCS receipt…");
+    const res = await fetch("/api/hedera/receipt", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ invoiceId, txId: lastTx }),
+    });
+    const body = await res.json();
+    if (!res.ok) {
+      setStatus(body.error ?? "HCS stamp unavailable — set HEDERA_* server env.");
+      return;
+    }
+    setStatus(`HCS receipt seq ${body.sequence} on topic ${body.topicId}`);
   };
 
   const selectToPay = (id: string) => {
@@ -218,73 +267,78 @@ const Home: NextPage = () => {
         {wrongNetwork && (
           <div className="alert alert-warning">
             <span>
-              Wallet is on chain <strong>{chainId}</strong>. Switch to <strong>Hedera Testnet (296)</strong> — RPC{" "}
-              <code>https://testnet.hashio.io/api</code>.
+              Wallet is on chain <strong>{chainId}</strong>. Switch to <strong>Hedera Testnet (296)</strong>.
             </span>
           </div>
         )}
         {unknownHederaAccount && (
           <div className="alert alert-error">
             <span>
-              Mirror Node has no Hedera account for {shortAddr(address)}. Create/import that ECDSA key in the{" "}
+              No Hedera account for {shortAddr(address)}. Import a Portal ECDSA key —{" "}
               <a className="link" href="https://portal.hedera.com" target="_blank" rel="noreferrer">
-                Hedera Portal
-              </a>{" "}
-              and fund it. Simulation will keep failing until then.
+                portal.hedera.com
+              </a>
             </span>
           </div>
         )}
         {hederaAccount && (
           <div className="alert alert-success">
             <span>
-              Hedera account <span className="font-mono font-semibold">{hederaAccount}</span> is ready on testnet.
+              Hedera account <span className="font-mono font-semibold">{hederaAccount}</span> is ready.
             </span>
           </div>
         )}
 
-        <section className="grid gap-6 lg:grid-cols-[1.4fr_0.85fr] lg:items-stretch">
+        <section className="grid gap-6 lg:grid-cols-[1.4fr_0.85fr]">
           <div className="rounded-3xl border border-base-300 bg-base-100 p-8 shadow-sm">
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-primary">SaucerPay</p>
-            <h1 className="mt-3 max-w-xl text-4xl font-bold tracking-tight md:text-5xl">Invoice escrow on Hedera</h1>
+            <h1 className="mt-3 text-4xl font-bold tracking-tight md:text-5xl">Invoice escrow on Hedera</h1>
             <p className="mt-4 max-w-xl text-base text-base-content/70">
-              Issue an invoice, collect the exact HBAR or HTS amount into escrow, then withdraw. Every step is a testnet
-              transaction you can open on HashScan.
+              Exact HBAR or HTS settlement, priced with SaucerSwap + Hedera rates, verified on HashScan, optional HCS
+              receipts for agents and back-office systems.
             </p>
             <div className="mt-6 flex flex-wrap gap-2">
               <a href="#create" className="badge badge-primary badge-lg cursor-pointer">
-                Create invoice
+                Create
               </a>
               <a href="#pay" className="badge badge-secondary badge-lg cursor-pointer">
-                Pay exact amount
+                Pay exact
               </a>
               <a href="#board" className="badge badge-ghost badge-lg cursor-pointer">
-                Invoice board
+                Board
               </a>
-              <a
-                className="badge badge-outline badge-lg cursor-pointer"
-                href={HASHSCAN_CONTRACT}
-                target="_blank"
-                rel="noreferrer"
-              >
-                Live contract ↗
+              <a className="badge badge-outline badge-lg cursor-pointer" href={HASHSCAN_CONTRACT} target="_blank" rel="noreferrer">
+                Contract ↗
+              </a>
+              <a className="badge badge-outline badge-lg cursor-pointer" href="/api/agent/manifest" target="_blank" rel="noreferrer">
+                Agent API
+              </a>
+              <a className="badge badge-outline badge-lg cursor-pointer" href="/llms.txt" target="_blank" rel="noreferrer">
+                llms.txt
               </a>
             </div>
           </div>
-
           <div className="flex flex-col justify-between rounded-3xl bg-neutral p-7 text-neutral-content shadow-xl">
             <div>
-              <p className="text-xs uppercase tracking-widest text-neutral-content/50">Connected wallet</p>
+              <p className="text-xs uppercase tracking-widest text-neutral-content/50">Wallet</p>
               <p className="mt-2 break-all font-mono text-sm">{address ?? "Not connected"}</p>
               <p className="mt-3 text-sm text-neutral-content/70">
-                {hederaAccount
-                  ? `Mapped Hedera ID ${hederaAccount}`
-                  : "Needs a real 0.0.x testnet account on chain 296."}
+                {hederaAccount ? `Mapped ${hederaAccount}` : "Needs a real 0.0.x account on chain 296."}
               </p>
             </div>
-            <p className="mt-6 text-xs text-neutral-content/50">
-              Escrow {shortAddr(ESCROW)} · next invoice id{" "}
-              <span className="font-mono text-neutral-content">{nextInvoiceId?.toString() ?? "—"}</span>
-            </p>
+            <div className="mt-6 space-y-1 text-xs text-neutral-content/60">
+              <p>
+                HBAR ${quote ? quote.hbarUsd.toFixed(4) : "…"} · source {quote?.settlementSource ?? "loading"}
+              </p>
+              {quote?.dex && (
+                <p>
+                  SaucerSwap book {quote.dex.bookId} {quote.dex.status} mark ${quote.dex.hbarUsd.toFixed(4)}
+                </p>
+              )}
+              <p>
+                Escrow {shortAddr(ESCROW)} · next #{nextInvoiceId?.toString() ?? "—"}
+              </p>
+            </div>
           </div>
         </section>
 
@@ -293,32 +347,48 @@ const Home: NextPage = () => {
             <div className="card-body gap-4">
               <div>
                 <h2 className="card-title text-xl">Create invoice</h2>
-                <p className="text-sm text-base-content/60">Blank token field = native HBAR (18 JSON-RPC decimals).</p>
+                <p className="text-sm text-base-content/60">Blank token = HBAR. USD uses SaucerSwap / Hedera rate.</p>
               </div>
               <label className="form-control">
                 <span className="label-text">HTS token (0.0.x or 0x…)</span>
-                <input
-                  className="input input-bordered"
-                  placeholder="Blank = HBAR"
-                  value={token}
-                  onChange={e => setToken(e.target.value)}
-                />
+                <div className="flex gap-2">
+                  <input
+                    className="input input-bordered flex-1"
+                    placeholder="Blank = HBAR"
+                    value={token}
+                    onChange={e => setToken(e.target.value)}
+                  />
+                  <button className="btn btn-ghost" type="button" onClick={lookupToken}>
+                    Lookup
+                  </button>
+                </div>
+                {tokenHint && <span className="label-text-alt mt-1">{tokenHint}</span>}
               </label>
               <div className="grid grid-cols-2 gap-3">
                 <label className="form-control">
-                  <span className="label-text">Amount</span>
+                  <span className="label-text">Amount {usdHint && <span className="opacity-60">{usdHint}</span>}</span>
                   <input className="input input-bordered" value={amount} onChange={e => setAmount(e.target.value)} />
                 </label>
                 <label className="form-control">
-                  <span className="label-text">Decimals</span>
+                  <span className="label-text">USD → HBAR</span>
                   <input
                     className="input input-bordered"
-                    value={isHbar ? "18" : decimals}
-                    disabled={isHbar}
-                    onChange={e => setDecimals(e.target.value)}
+                    placeholder="e.g. 5"
+                    value={usd}
+                    disabled={!isHbar}
+                    onChange={e => applyUsd(e.target.value)}
                   />
                 </label>
               </div>
+              <label className="form-control">
+                <span className="label-text">Decimals</span>
+                <input
+                  className="input input-bordered"
+                  value={isHbar ? "18" : decimals}
+                  disabled={isHbar}
+                  onChange={e => setDecimals(e.target.value)}
+                />
+              </label>
               <label className="form-control">
                 <span className="label-text">Order reference</span>
                 <input className="input input-bordered" value={metadata} onChange={e => setMetadata(e.target.value)} />
@@ -333,36 +403,27 @@ const Home: NextPage = () => {
             <div className="card-body gap-4">
               <div>
                 <h2 className="card-title text-xl">Pay invoice</h2>
-                <p className="text-sm text-base-content/60">
-                  Amount is read from the contract. You cannot overpay or underpay.
-                </p>
+                <p className="text-sm text-base-content/60">Amount is read from the contract. No over/under pay.</p>
               </div>
               <label className="form-control">
                 <span className="label-text">Invoice ID</span>
-                <input
-                  className="input input-bordered"
-                  value={invoiceId}
-                  onChange={e => setInvoiceId(e.target.value)}
-                />
+                <input className="input input-bordered" value={invoiceId} onChange={e => setInvoiceId(e.target.value)} />
               </label>
               <label className="form-control">
-                <span className="label-text">Receipt note (optional)</span>
+                <span className="label-text">Receipt note</span>
                 <input
                   className="input input-bordered"
-                  placeholder="receipt reference"
+                  placeholder="optional"
                   value={receiptRef}
                   onChange={e => setReceiptRef(e.target.value)}
                 />
               </label>
               {liveInvoice && liveInvoice[0] !== ZERO && (
                 <div className="rounded-xl bg-base-200 px-3 py-2 text-xs">
-                  <p>
-                    Status <span className="font-semibold">{STATUS_LABEL[Number(liveInvoice[5])] ?? "?"}</span>
-                    {" · "}
-                    {liveInvoice[1].toLowerCase() === ZERO
-                      ? `${formatEther(liveInvoice[2])} HBAR`
-                      : `${liveInvoice[2].toString()} units`}
-                  </p>
+                  Status {STATUS_LABEL[Number(liveInvoice[5])] ?? "?"} ·{" "}
+                  {liveInvoice[1].toLowerCase() === ZERO
+                    ? `${formatEther(liveInvoice[2])} HBAR`
+                    : `${liveInvoice[2].toString()} units`}
                   <p className="mt-1 font-mono text-base-content/60">Merchant {shortAddr(liveInvoice[0])}</p>
                 </div>
               )}
@@ -375,13 +436,20 @@ const Home: NextPage = () => {
 
         {(status || lastTx) && (
           <div className="alert border border-base-300 bg-base-100">
-            <div className="w-full space-y-1">
+            <div className="w-full space-y-2">
               {status && <p className="text-sm break-words">{status}</p>}
-              {lastTx && (
-                <a className="link link-primary font-mono text-sm" href={HASHSCAN_TX(lastTx)} target="_blank" rel="noreferrer">
-                  Open transaction on HashScan ↗
-                </a>
-              )}
+              <div className="flex flex-wrap gap-3">
+                {lastTx && (
+                  <a className="link link-primary font-mono text-sm" href={HASHSCAN_TX(lastTx)} target="_blank" rel="noreferrer">
+                    HashScan ↗
+                  </a>
+                )}
+                {lastTx && (
+                  <button className="btn btn-xs btn-outline" type="button" onClick={stampHcs}>
+                    Stamp HCS receipt
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         )}
@@ -391,15 +459,14 @@ const Home: NextPage = () => {
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="card-title text-xl">Invoice board</h2>
-                <p className="text-sm text-base-content/60">Live reads from InvoiceEscrow · latest 12</p>
+                <p className="text-sm text-base-content/60">Live InvoiceEscrow reads · latest 12</p>
               </div>
               <button className="btn btn-ghost btn-sm" type="button" onClick={() => refetchNext()}>
                 Refresh
               </button>
             </div>
-
             {idsToShow.length === 0 ? (
-              <p className="py-8 text-center text-sm text-base-content/50">No invoices yet — create one above.</p>
+              <p className="py-8 text-center text-sm text-base-content/50">No invoices yet.</p>
             ) : (
               <div className="overflow-x-auto">
                 <table className="table table-sm">
