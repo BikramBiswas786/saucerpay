@@ -1,16 +1,42 @@
 {
   "name": "saucerpay",
-  "description": "Hedera invoice escrow with HBAR or HTS-token settlement, HCS-ready receipts, and Mirror Node metadata.",
+  "description": "Hedera invoice escrow: exact HBAR/HTS settlement, SaucerSwap quotes, Mirror Node metadata, HCS receipts.",
   "create-scaffold-hbar": {
     "capabilities": {
       "frontend": ["nextjs-app"],
       "solidityFramework": ["hardhat"],
-      "packageManager": ["npm", "yarn"]
+      "packageManager": ["yarn", "npm"]
     },
     "defaults": {
       "frontend": "nextjs-app",
       "solidityFramework": "hardhat",
-      "packageManager": "npm"
+      "packageManager": "yarn"
+    },
+    "outro": {
+      "sections": [
+        {
+          "title": "Suggested steps",
+          "steps": [
+            {
+              "label": "Copy env files",
+              "text": "packages/hardhat/.env.example to .env and packages/nextjs/.env.example to .env.local"
+            },
+            {
+              "label": "Compile and test",
+              "command": "yarn hardhat:compile && yarn hardhat:test"
+            },
+            {
+              "label": "Start the app",
+              "command": "{run:next:dev}"
+            },
+            {
+              "label": "Connect a Hedera testnet account",
+              "text": "Chain 296, Hashio RPC. A random MetaMask key is not a Hedera account.",
+              "url": "https://portal.hedera.com"
+            }
+          ]
+        }
+      ]
     }
   }
 }
