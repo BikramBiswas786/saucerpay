@@ -1,34 +1,46 @@
 # SaucerPay
 
-**Hedera invoice escrow for HBAR and HTS-compatible tokens.** SaucerPay is a production-shaped Scaffold-HBAR template for merchants who need to create invoices, accept settlement on Hedera, and produce receipts that can be inspected on HashScan or anchored to the Hedera Consensus Service.
-
-## Why this template exists
-
-A developer should be able to start a Hedera payment workflow without assembling wallet connection, a contract, token settlement, Mirror Node reads, and receipt stamping from unrelated examples. SaucerPay composes those pieces into one focused pattern:
-
-1. A merchant creates an invoice for HBAR or an HTS token.
-2. A payer settles the exact amount through the `InvoiceEscrow` contract.
-3. The contract emits indexed `InvoiceCreated` and `InvoicePaid` events.
-4. The frontend links developers to HashScan, while the optional API route stamps a compact receipt in an HCS topic.
-5. The Mirror Node route resolves a Hedera token ID into human-readable metadata.
-
-The integration is load-bearing: removing Hedera EVM token compatibility, HashScan events, or HCS receipt stamping removes the core payment and verification workflow.
-
-## Scaffold in one command
+**Invoice escrow on Hedera** for HBAR and HTS. A Scaffold-HBAR template: one command, a working merchant → payer → withdraw flow, HashScan evidence, SaucerSwap quotes, Mirror Node metadata, and optional HCS receipts.
 
 ```bash
 npm create scaffold-hbar@latest --template BikramBiswas786/saucerpay
-cd saucerpay
-npm install
 ```
 
-## Why this is more than an AI demo
+Built for the [Scaffold-HBAR Template Bounty](https://hedera.com/blog/scaffold-hbar-template-bounty/).
 
-The product is not “a form that calls a contract.” It packages a business result: **a merchant can request payment, a payer can settle in HBAR or an HTS token, and both sides receive a verifiable settlement trail**. The contract owns the settlement state, the event schema makes the result inspectable on HashScan, the Mirror Node route supplies token context, and the HCS route can anchor an application receipt for downstream systems.
+## What you get
 
-That distinction matters. AI can generate a generic checkout screen quickly. It is much less valuable unless the workflow is tied to a real operational outcome. SaucerPay therefore keeps the scope narrow and reusable: invoice creation, exact settlement, merchant withdrawal, and receipt verification. The reusable asset is the workflow and its Hedera-native integration, not the number of screens.
+1. Merchant creates an invoice (HBAR or HTS token id `0.0.x`).
+2. Payer settles the **exact** on-chain amount into `InvoiceEscrow`.
+3. Merchant withdraws.
+4. Events are on [HashScan](https://hashscan.io/testnet/contract/0xd955a0ADe4a5EC4AA95422D2D7650749A2fe1db3).
+5. `GET /api/quote` sizes USD → HBAR from **SaucerSwap** testnet order books, falling back to Hedera network exchangerate.
+6. Optional `POST /api/hedera/receipt` stamps an HCS message.
+7. Agents read `/llms.txt` and `GET /api/agent/manifest`.
 
-The template targets Node.js **20.18.3 or later** and includes Next.js, Hardhat, TypeScript, Viem, Wagmi, the Hedera SDK, and the Scaffold-HBAR UI components.
+Removing SaucerSwap/Hedera quotes, Mirror Node, or the escrow contract breaks the product. That is the load-bearing integration the bounty asks for.
+
+## Eligibility / proof
+
+| Gate | Evidence |
+| --- | --- |
+| Monorepo | `packages/hardhat` + `packages/nextjs` |
+| Manifest | [`template.json`](./template.json) |
+| Docs | this README, [`AGENTS.md`](./AGENTS.md), [`ARCHITECTURE.md`](./ARCHITECTURE.md) |
+| Hedera services | Solidity escrow + HTS facade + Mirror Node + HCS route |
+| Testnet tx | [createInvoice](https://hashscan.io/testnet/transaction/0xb242ea5a73a675ab9c6a666aee3a58c32f89b2267c447c5d81f1de7070d0a96d) |
+| Live contract | [0xd955a0ADe4a5EC4AA95422D2D7650749A2fe1db3](https://hashscan.io/testnet/contract/0xd955a0ADe4a5EC4AA95422D2D7650749A2fe1db3) |
+| MIT | [`LICENCE`](./LICENCE) |
+| Harness | [`.harness/recipe.yaml`](./.harness/recipe.yaml) |
+
+## Prerequisites
+
+- Node.js ≥ 20.18.3
+- Yarn 3 (repo default) or npm
+- A **Hedera testnet** ECDSA account from the [Hedera Portal](https://portal.hedera.com), funded via the faucet
+- MetaMask on chain **296**, RPC `https://testnet.hashio.io/api`
+
+A brand-new MetaMask key is **not** a Hedera account. Hashio will return `Sender account not found` until Mirror Node lists `0.0.x` for that EVM address.
 
 ## Run locally
 
@@ -41,64 +53,44 @@ yarn hardhat:test
 yarn next:dev
 ```
 
-Open `http://localhost:3000`. A local wallet can be used for the contract tests. For a real Hedera flow, deploy to testnet and update the generated contract registry as described below.
-
-## Testnet deployment
-
-Create or import a funded Hedera testnet account through the [Hedera Portal](https://portal.hedera.com). Never commit the private key.
+Open `http://localhost:3000`. The checked-in registry already points at the testnet escrow. Deploy your own only if you want a fresh contract:
 
 ```bash
 export __RUNTIME_DEPLOYER_PRIVATE_KEY=0xYOUR_TESTNET_PRIVATE_KEY
 yarn hardhat:deploy --network hederaTestnet
 ```
 
-The deploy command compiles the contracts, deploys `InvoiceEscrow`, and regenerates the TypeScript ABI registry at `packages/nextjs/contracts/deployedContracts.ts`. Start the frontend after deployment:
+## Using the app
 
-```bash
-yarn next:dev
-```
+1. Connect the funded `0.0.x` wallet on Hedera Testnet. The green banner must show the Hedera account id.
+2. Create an HBAR invoice (leave token blank) or paste an HTS id such as `0.0.429274`.
+3. Optional: enter USD — the quote API converts with SaucerSwap/Hedera rates.
+4. On the board, tap **Pay**, then **Pay exact amount**. The app sends the on-chain amount, not the form field.
+5. Merchant taps **Withdraw**.
+6. Optional: **Stamp HCS receipt** after a successful pay (needs server operator env).
 
-The web app accepts an HTS token ID such as `0.0.1234` and converts it to the Hedera EVM address. For an HTS payment, the payer must approve the deployed escrow contract for the invoice amount before calling **Pay invoice**. HBAR invoices use the native payable path and do not require token approval.
+HTS payers must approve the escrow for the invoice amount first.
 
-## Optional HCS receipt stamping
+## Environment
 
-The API route at `POST /api/hedera/receipt` uses the official Hedera SDK and is disabled unless all three variables are configured:
+| Variable | Where | Purpose |
+| --- | --- | --- |
+| `NEXT_PUBLIC_WALLET_CONNECT_PROJECT_ID` | browser | WalletConnect (optional locally) |
+| `HEDERA_ACCOUNT_ID` | server | HCS operator |
+| `HEDERA_PRIVATE_KEY` | server | HCS operator — never `NEXT_PUBLIC_` |
+| `HEDERA_RECEIPT_TOPIC_ID` | server | HCS topic |
+| `HEDERA_MIRROR_TESTNET_URL` | server | Mirror Node |
 
-```bash
-HEDERA_ACCOUNT_ID=0.0.1234
-HEDERA_PRIVATE_KEY=your_operator_key
-HEDERA_RECEIPT_TOPIC_ID=0.0.5678
-```
+## API (humans and agents)
 
-Example request:
-
-```bash
-curl -X POST http://localhost:3000/api/hedera/receipt \
-  -H 'content-type: application/json' \
-  -d '{"invoiceId":"0","txId":"0.0.1234@1234567890.000000000"}'
-```
-
-Use a dedicated low-balance testnet operator for this route. The private key is read only from the server environment and is never exposed to the browser.
-
-## Mirror Node token metadata
-
-```text
-GET /api/hedera/token?id=0.0.1234
-```
-
-The route reads testnet token metadata from the Hedera Mirror Node and returns the token ID, name, symbol, decimals, type, and treasury account.
-
-## Contract surface
-
-`packages/hardhat/contracts/InvoiceEscrow.sol` implements:
-
-- `createInvoice(token, amount, dueAt, metadataHash)` for merchant invoices.
-- `payInvoice(invoiceId, receiptHash)` for exact HBAR or HTS-compatible settlement.
-- `withdraw(invoiceId)` for merchant settlement.
-- `cancelInvoice(invoiceId)` for open invoices.
-- Indexed payment and receipt events for HashScan and Mirror Node indexing.
-
-The contract intentionally keeps invoice metadata off-chain. The `metadataHash` field lets an application bind an external invoice or order document to the on-chain record without putting customer data on a public ledger.
+| Route | Role |
+| --- | --- |
+| `GET /api/quote` | SaucerSwap HBAR/USDC + Hedera exchangerate |
+| `GET /api/hedera/token?id=0.0.x` | Mirror token metadata |
+| `GET /api/hedera/account?evm=0x…` | EVM → `0.0.x` or null |
+| `POST /api/hedera/receipt` | HCS stamp |
+| `GET /api/agent/manifest` | Machine-readable tools |
+| `/llms.txt` | Agent briefing |
 
 ## Validation
 
@@ -109,28 +101,9 @@ yarn next:check-types
 yarn next:build
 ```
 
-The Hardhat suite covers native HBAR settlement, HTS-compatible ERC-20 settlement, approval, payment events, and withdrawal. The testnet proof required for a bounty submission should be added to the submission notes as a HashScan transaction link after deploying and executing one invoice flow on testnet.
+## Security
 
-## Repository layout
-
-```text
-packages/
-  hardhat/
-    contracts/InvoiceEscrow.sol
-    deploy/03_deploy_invoice_escrow.ts
-    test/InvoiceEscrow.test.ts
-  nextjs/
-    app/page.tsx
-    app/api/hedera/token/route.ts
-    app/api/hedera/receipt/route.ts
-    contracts/deployedContracts.ts
-template.json
-AGENTS.md
-```
-
-## Security notes
-
-This is a starting template, not a completed production payment processor. Add access control, invoice expiry handling, reentrancy protection appropriate to your threat model, robust token allow-listing, rate limits, monitoring, and a professional audit before using real funds. Do not commit `.env`, private keys, customer documents, or production secrets.
+Template, not a production processor. Add allow-lists, expiry enforcement, monitoring, and an audit before mainnet funds. Do not commit secrets.
 
 ## License
 
